@@ -42,7 +42,7 @@ Why is this correct? Because for a valid signature:
 ` = e(g * sk, hash(m)) = e(pk, hash(m))`
 
 In BLS signature scheme we also have a concept called aggregation which is basically a linear operation over the public keys/ 
-signatures. Coefficients are determined by the `lagrange_basis` function. Aggregation is used in multiparty signature schemes,
+signatures. Coefficients are determined by the `lagrange_basis` function ([defination](https://github.com/asonnino/bls/blob/master/bls/utils.py#L13)). Aggregation is used in multiparty signature schemes,
 details of which I would be skipping, but you may read over [here]()
 
 Now for the challenge, lets collect what all we have; We have three public keys `pA`, `pB` and `pC`. We can get message "ham"
@@ -52,6 +52,63 @@ is a valid signature of the public key obtained by aggregation of `p1`, `p2` and
 
 There are some constraints too - `s1` and `s2` cannot be same ([here](brillouin.py#L65)), `p1` and `p2` must be one of the `pA`, 
 `pB` and `pC`, though they can be same ([here](brillouin.py#L51)). _We have no limitations for `p2`_. This is our catch. We use
-`lagrange_basis` function to calculate the coefficients -
+`lagrange_basis` function to calculate the coefficients, referring the code from [here](https://github.com/asonnino/bls/blob/master/bls/scheme.py#L69)
 
 ```python
+from bls.scheme import setup
+
+def lagrange_basis(t, o, i, x=0):
+	numerator, denominator = 1, 1
+	for j in range(1,t+1):
+		if j != i:
+			numerator = (numerator * (x - j)) % o
+			denominator = (denominator * (i - j)) % o 
+	return (numerator * denominator.mod_inverse(o)) % o
+
+params = setup()
+(G, o, g1, g2, e) = params
+# for 2 signatures
+l = [lagrange_basis(2, o, i, 0) for i in range(1,3)]
+print l
+# for 3 public keys
+l = [lagrange_basis(3, o, i, 0) for i in range(1,4)]
+```
+Output comes out to be - 
+```
+[2, 16798108731015832284940804142231733909759579603404752749028378864165570215948]
+[3, 16798108731015832284940804142231733909759579603404752749028378864165570215946, 1]
+```
+
+It is important to see that the difference between the two large numbers is 2. Let us call them `L` and `L-2`.
+
+So we now have to plug such values of `s1`, `s2`, `p1`, `p2` and `p3`such that:
+
+```
+e(g, 2*s1 + L*s2) == e(3*p1 + (L-2)*p2 + p3, hash("this stuff"))
+```
+Now suppose I sign the message "this stuff" with my key and pass that in `s2` and get the sign of `pC` on the same message, I will get two signs of the required message. Let's create a dummy public + secret key pair `sk0 = 3` and `p0 = 3*g` and sign "this stuff" with it and get `s0`. Lets call the sign from `pC` - `sC`. So,
+
+```
+e(pC, hash("this stuff")) = e(g, sC)
+e(p0, hash("this stuff")) = e(g, s0)
+```
+
+Now what we do is also called Rogue Public Key attack, but lets not use these terms here. Rather a simple explaination - If I put `p1 = pC`, `p2 = pC` and `p3 =  2*p0 - pC`:
+
+```
+       e( 3*p1 + (L-2)*p2 + p3, hash("this stuff"))
+    =  e( (L+1)*pC + 2*p0 - pC, hash("this stuff"))
+    =  e( L*pC + 2*p0, hash("this stuff"))
+    =  e( pC, hash("this stuff") ) * e( pC, hash("this stuff") ) .... * e( p0, hash("this stuff") ) * e( p0, hash("this stuff") )
+    =  e( g, sC ) * e( g, sC ) .... * e( g, s0 ) * e( g, s0 )
+    =  e( g, 2*s0 + L*sC )
+ ```
+ 
+Voila! 
+
+I can pass `s0` and `sC` as the signatures! And you get the flag on running the script:
+
+```
+flag{we_must_close_the_dh_gap}
+
+```
